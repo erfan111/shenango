@@ -56,7 +56,7 @@ static int cpu_scan_topology(void)
 	bitmap_for_each_set(cpu_mask, NCPU, i) {
 		cpu_count++;
 		if (cpu_count <= i) {
-			log_err("cpu: can't support non-contiguous CPU mask.");
+			log_err("cpu: %d %d can't support non-contiguous CPU mask.", cpu_count, i);
 			return -EINVAL;
 		}
 	}

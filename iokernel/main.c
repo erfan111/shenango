@@ -4,6 +4,8 @@
 
 #include <rte_ethdev.h>
 #include <rte_lcore.h>
+#include <rte_pdump.h>  // =e
+
 
 #include <base/init.h>
 #include <base/log.h>
@@ -131,6 +133,8 @@ int main(int argc, char *argv[])
 			ARRAY_SIZE(iok_init_handlers));
 	if (ret)
 		return ret;
+	/* initialize packet capture framework */
+	rte_pdump_init();  // =e
 
 	dataplane_loop();
 	return 0;

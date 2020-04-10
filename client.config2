@@ -1,0 +1,6 @@
+# an example runtime config file
+host_addr 10.10.1.3
+host_netmask 255.255.255.0
+host_gateway 10.10.1.3
+runtime_kthreads 12
+runtime_spinning_kthreads 12

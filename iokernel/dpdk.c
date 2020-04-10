@@ -50,7 +50,7 @@
 
 static const struct rte_eth_conf port_conf_default = {
 	.rxmode = {
-		.max_rx_pkt_len = ETHER_MAX_LEN,
+		.max_rx_pkt_len = ETH_MAX_LEN,
 		.offloads = DEV_RX_OFFLOAD_IPV4_CKSUM,
 		.mq_mode = ETH_MQ_RX_RSS | ETH_MQ_RX_RSS_FLAG,
 	},
@@ -95,7 +95,7 @@ static inline int dpdk_port_init(uint8_t port, struct rte_mempool *mbuf_pool)
 
 	rte_eth_dev_info_get(0, &dev_info);
 	rxconf = &dev_info.default_rxconf;
-	rxconf->rx_free_thresh = 64;
+	rxconf->rx_free_thresh = 32;
 
 	/* Allocate and set up 1 RX queue per Ethernet port. */
 	for (q = 0; q < rx_rings; q++) {
@@ -107,8 +107,8 @@ static inline int dpdk_port_init(uint8_t port, struct rte_mempool *mbuf_pool)
 
 	/* Enable TX offloading */
 	txconf = &dev_info.default_txconf;
-	txconf->tx_rs_thresh = 64;
-	txconf->tx_free_thresh = 64;
+	txconf->tx_rs_thresh = 32;
+	txconf->tx_free_thresh = 32;
 
 	/* Allocate and set up 1 TX queue per Ethernet port. */
 	for (q = 0; q < tx_rings; q++) {
@@ -124,7 +124,7 @@ static inline int dpdk_port_init(uint8_t port, struct rte_mempool *mbuf_pool)
 		return retval;
 
 	/* Display the port MAC address. */
-	struct ether_addr addr;
+	struct rte_ether_addr addr;
 	rte_eth_macaddr_get(port, &addr);
 	log_info("dpdk: port %u MAC: %02" PRIx8 " %02" PRIx8 " %02" PRIx8
 			" %02" PRIx8 " %02" PRIx8 " %02" PRIx8 "",

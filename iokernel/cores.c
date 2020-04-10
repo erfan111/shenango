@@ -777,11 +777,11 @@ void cores_adjust_assignments(void)
  */
 int cores_init(void)
 {
-	int i, j;
+	int i, j, ctr = 0;
 
 	/* assign first non-zero core on socket 0 to the dataplane thread */
 	for (i = 1; i < cpu_count; i++) {
-		if (cpu_info_tbl[i].package == 0)
+		if (cpu_info_tbl[i].package == 1)	// =e
 			break;
 	}
 	if (i == cpu_count)
@@ -834,14 +834,16 @@ int cores_init(void)
 		if (i != j)
 			continue;
 #endif
-
-		if (cpu_info_tbl[i].package == 0)
+		if ((i < 30 && i > 19) || i < 10) continue;
+		if (cpu_info_tbl[i].package == 1)
 			core_init(i);
+			ctr++;
 	}
 
 	log_info("cores: linux on core %d, control on %d, dataplane on %d",
 		 core_assign.linux_core, core_assign.ctrl_core,
 		 core_assign.dp_core);
+	log_info("cores: initialized %d cores", ctr);
 
 	return 0;
 }
