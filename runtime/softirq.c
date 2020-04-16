@@ -68,7 +68,10 @@ static void softirq_gather_work(struct softirq_work *w, struct kthread *k,
 		case RX_JOIN:
 			w->join_reqs[join_cnt++] = (struct kthread *)payload;
 			break;
-
+		// =e
+		case RX_STEAL:
+			triggered_steal(payload);
+			break;
 		default:
 			log_err_ratelimited("net: invalid RXQ cmd '%ld'", cmd);
 		}

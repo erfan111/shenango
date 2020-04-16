@@ -18,6 +18,7 @@
 #include <runtime/thread.h>
 
 #include "defs.h"
+#include "cbuffer.h"
 
 /* the currently running thread, or NULL if in runtime code */
 __thread thread_t *__self;
@@ -25,6 +26,10 @@ __thread thread_t *__self;
 static __thread void *runtime_stack;
 /* a pointer to the bottom of the per-kthread (TLS) runtime stack */
 static __thread void *runtime_stack_base;
+
+// =e
+static u_int64_t master_counter;
+//
 
 /* Flag to prevent watchdog from running */
 bool disable_watchdog;
@@ -94,75 +99,68 @@ static __noreturn void jmp_runtime_nosave(runtime_fn_t fn, unsigned long arg)
 static void drain_overflow(struct kthread *l)
 {
 	thread_t *th;
-
+	// log_info("in drain %lu", l);
 	assert_spin_lock_held(&l->lock);
 
-	while (l->rq_head - l->rq_tail < RUNTIME_RQ_SIZE) {
+	while (l->load < RUNTIME_RQ_SIZE) {
 		th = list_pop(&l->rq_overflow, thread_t, link);
 		if (!th)
 			break;
-		l->rq[l->rq_head++ % RUNTIME_RQ_SIZE] = th;
-		l->q_ptrs->rq_head++;
+		cbuffer_push(l, th);
+		// l->rq[l->rq_head++ % RUNTIME_RQ_SIZE] = th;
 	}
+	// log_info("in drain - done %lu", l);
 }
 
 static bool steal_work(struct kthread *l, struct kthread *r)
 {
-	thread_t *th;
+	thread_t *th, *temp;
 	uint32_t i, avail, rq_tail;
-
+	// log_info("in steal %lu from %lu, current rq size = %d - %d", l, r, l->rq_head, l->rq_tail);
 	assert_spin_lock_held(&l->lock);
-	assert(l->rq_head == 0 && l->rq_tail == 0);
+	// assert(l->rq_head == 0 && l->rq_tail == 0);
 
 	if (!spin_try_lock(&r->lock))
 		return false;
-
 	/* harmless race condition */
 	if (unlikely(r->detached)) {
 		spin_unlock(&r->lock);
 		return false;
 	}
-
-	/* try to steal directly from the runqueue */
-	avail = load_acquire(&r->rq_head) - r->rq_tail;
+	/* try to steal directly from the runqueue */	// todo
+	avail = load_acquire(&r->load);
 	if (avail) {
 		/* steal half the tasks */
 		avail = div_up(avail, 2);
 		assert(avail <= div_up(RUNTIME_RQ_SIZE, 2));
-		rq_tail = r->rq_tail;
-		for (i = 0; i < avail; i++)
-			l->rq[i] = r->rq[rq_tail++ % RUNTIME_RQ_SIZE];
-		store_release(&r->rq_tail, rq_tail);
-		r->q_ptrs->rq_tail += avail;
+		for (i = 0; i < avail; i++){
+			temp = cbuffer_pop(r);
+			cbuffer_push(l, temp);
+			// l->rq[i] = r->rq[rq_tail++ % RUNTIME_RQ_SIZE];
+		}
 		spin_unlock(&r->lock);
 
-		l->rq_head = avail;
-		l->q_ptrs->rq_head += avail;
 		STAT(THREADS_STOLEN) += avail;
 		return true;
 	}
-
 	/* check for overflow tasks */
 	th = list_pop(&r->rq_overflow, thread_t, link);
 	if (th)
 		goto done;
-
 	/* check for softirqs */
 	th = softirq_run_thread(r, RUNTIME_SOFTIRQ_BUDGET);
 	if (th) {
 		STAT(SOFTIRQS_STOLEN)++;
 		goto done;
 	}
-
 done:
 	/* either enqueue the stolen work or detach the kthread */
 	if (th) {
-		l->rq[l->rq_head++] = th;
-		l->q_ptrs->rq_head++;
+		cbuffer_push(l, th);
+		// l->rq[l->rq_head++] = th;
 		STAT(THREADS_STOLEN)++;
 	} else if (r->parked) {
 		kthread_detach(r);
-
 		/*
 		 * handle the case where kthread_detach -> rcu_detach leads to a
 		 * thread being added to the runqueue (but not returned above)
@@ -170,9 +168,8 @@ done:
 		if (l->rq_head != l->rq_tail)
 			th = l->rq[l->rq_head];
 	}
-
 	spin_unlock(&r->lock);
-	return th != NULL;
+	return false;
 }
 
 static __noinline struct thread *do_watchdog(struct kthread *l)
@@ -190,6 +187,44 @@ static __noinline struct thread *do_watchdog(struct kthread *l)
 
 	return NULL;
 }
+
+// =e
+bool triggered_steal(uint64_t overloaded_count)
+{
+	int i, overloaded_id = -1, my_id = -1;
+	uint32_t total_load = 0, nr_loaded_threads = 0, mean_load, overloaded_ld = 0;
+	struct kthread *me = myk();
+	for(i=0; i < nrks;i++)
+	{
+		if(ks[i]->parked)
+			continue;
+		if(ks[i] == me)
+			my_id = i;
+		total_load += ks[i]->load;
+		if(ks[i]->load > overloaded_ld)
+		{
+			overloaded_ld = ks[i]->load;
+			overloaded_id = i;
+		}
+		nr_loaded_threads++;
+	}
+	log_info("TRIGGERED STEAL: kthread %d, nr_running=%d from %d that has %d threads (%lu)", my_id, me->load, overloaded_id, overloaded_ld, overloaded_count);
+	steal_work(me, ks[overloaded_id]);
+	// log_info("steal completed------- %d", me->rq_head);
+	// for (i = 0; i < nrks; i++)
+	// 	log_info("kthread %d, nr_running=%d - parked? %d", i, ks[i]->load, ks[i]->parked);
+	// log_info("-------");
+	lrpc_send(&me->txcmdq, TXCMD_BALANCE_COMPLETE, me->load);
+	return 1;
+}
+
+static void send_load_to_iokernel(struct kthread *me)
+{
+	// uint64_t payload = me
+	// log_info("sending load to iokernel %lu %d-------", me, me->load);
+	lrpc_send(&me->txcmdq, TXCMD_REPORT, me->load);
+}
+//
 
 /* the main scheduler routine, decides what to run next */
 static __noreturn void schedule(void)
@@ -233,13 +268,16 @@ static __noreturn void schedule(void)
 	if (unlikely(!list_empty(&l->rq_overflow)))
 		drain_overflow(l);
 
+	// =e // TODO: not always
+	send_load_to_iokernel(l);
+
 again:
 	/* first try the local runqueue */
-	if (l->rq_head != l->rq_tail)
+	if (l->load > 0)
 		goto done;
 
 	/* reset the local runqueue since it's empty */
-	l->rq_head = l->rq_tail = 0;
+	// l->rq_head = l->rq_tail = 0;
 
 	/* then check for local softirqs */
 	th = softirq_run_thread(l, RUNTIME_SOFTIRQ_BUDGET);
@@ -289,11 +327,14 @@ again:
 	goto again;
 
 done:
+
+	//
 	/* pop off a thread and run it */
 	if (!th) {
-		assert(l->rq_head != l->rq_tail);
-		th = l->rq[l->rq_tail++ % RUNTIME_RQ_SIZE];
-		l->q_ptrs->rq_tail++;
+		assert(l->load > 0);
+		th = cbuffer_pop(l);
+		// log_info("we have a thread ready to run %lu, %lu", l, th);
+		// th = l->rq[l->rq_tail++ % RUNTIME_RQ_SIZE];
 	}
 
 	/* move overflow tasks into the runqueue */
@@ -306,7 +347,7 @@ done:
 	end_tsc = rdtsc();
 	STAT(SCHED_CYCLES) += end_tsc - start_tsc;
 	last_tsc = end_tsc;
-
+	// log_info("jumping to thread %lu, %lu", l, th);
 	jmp_thread(th);
 }
 
@@ -318,8 +359,9 @@ done:
  */
 void join_kthread(struct kthread *k)
 {
-	thread_t *waketh;
+	thread_t *waketh, *temp_thread;
 	struct list_head tmp;
+	int i, load;
 
 	//log_info_ratelimited("join_kthread() %p", k);
 
@@ -336,11 +378,11 @@ void join_kthread(struct kthread *k)
 	}
 
 	/* drain the runqueue */
-	for (; k->rq_tail < k->rq_head; k->rq_tail++) {
-		list_add_tail(&tmp, &k->rq[k->rq_tail % RUNTIME_RQ_SIZE]->link);
-		k->q_ptrs->rq_tail++;
+	load = k->load;
+	for (i = 0; i < load; i++) {
+		temp_thread = cbuffer_pop(k);
+		list_add_tail(&tmp, &temp_thread->link);
 	}
-	k->rq_head = k->rq_tail = 0;
 
 	/* drain the overflow runqueue */
 	list_append_list(&tmp, &k->rq_overflow);
@@ -427,25 +469,25 @@ void thread_park_and_unlock_np(spinlock_t *l)
 void thread_ready(thread_t *th)
 {
 	struct kthread *k;
-	uint32_t rq_tail;
-
+	uint32_t load;
 	assert(th->state == THREAD_STATE_SLEEPING);
 	th->state = THREAD_STATE_RUNNABLE;
-
+	// TODO =e	implement select CPU for thread
 	k = getk();
-	rq_tail = load_acquire(&k->rq_tail);
-	if (unlikely(k->rq_head - rq_tail >= RUNTIME_RQ_SIZE)) {
-		assert(k->rq_head - rq_tail == RUNTIME_RQ_SIZE);
+	load = load_acquire(&k->load);
+	// log_info("getting the thread ready on %lu, load=%d", k, load);
+	if (unlikely(load >= RUNTIME_RQ_SIZE)) {
+		assert(load == RUNTIME_RQ_SIZE);
 		spin_lock(&k->lock);
 		list_add_tail(&k->rq_overflow, &th->link);
 		spin_unlock(&k->lock);
 		putk();
 		return;
 	}
-
-	k->rq[k->rq_head % RUNTIME_RQ_SIZE] = th;
-	store_release(&k->rq_head, k->rq_head + 1);
-	k->q_ptrs->rq_head++;
+	cbuffer_push(k, th);
+	// log_info("running threads %lu, load=%d", k, k->load);
+	// k->rq[k->rq_head % RUNTIME_RQ_SIZE] = th;
+	// store_release(&k->rq_head, k->rq_head + 1);
 	putk();
 }
 
@@ -482,7 +524,6 @@ void thread_yield_kthread(void)
 static void thread_finish_yield(unsigned long data)
 {
 	thread_t *myth = thread_self();
-
 	assert(myth->state == THREAD_STATE_RUNNING);
 	myth->state = THREAD_STATE_SLEEPING;
 	thread_ready(myth);
@@ -709,6 +750,9 @@ int sched_init(void)
 			cpu_map[i].sibling_core = j;
 		}
 	}
+
+	// =e
+	master_counter = 0;
 
 	return 0;
 }

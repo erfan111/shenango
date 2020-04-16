@@ -11,16 +11,22 @@ extern "C" {
 
 #include <iostream>
 #include <chrono>
+#include <fstream>
+#include <signal.h>
+
 
 namespace {
 
 int threads;
 uint64_t n;
 std::string worker_spec;
+std::ofstream myfile;
+
 
 void MainHandler(void *arg) {
   rt::WaitGroup wg(1);
   uint64_t cnt[threads] = {};
+  myfile.open("counters.csv");
 
   for (int i = 0; i < threads; ++i) {
     rt::Spawn([&,i](){
@@ -47,16 +53,28 @@ void MainHandler(void *arg) {
       uint64_t total = 0;
       double duration = std::chrono::duration_cast<
         std::chrono::duration<double>>(now - last).count();
+      double us_d = std::chrono::duration_cast<std::chrono::microseconds>(now - last).count();
       for (int i = 0; i < threads; i++) total += cnt[i];
-      log_info("%f", static_cast<double>(total - last_total) / duration);
+      log_info("%f - %f", static_cast<double>(total - last_total) / duration, static_cast<double>(total - last_total) / us_d);
       last_total = total;
       last = now;
+      for(int i = 0; i < threads;i++)
+        myfile << cnt[i] << ",";
+      myfile << std::endl;
+
     }
   });
 
   // never returns
   wg.Wait();
 }
+
+void handle_sigint(int sig) 
+{ 
+    printf("Caught signal %d\n", sig); 
+    myfile.close();
+    exit(0);
+} 
 
 } // anonymous namespace
 
@@ -68,6 +86,7 @@ int main(int argc, char *argv[]) {
               << std::endl;
     return -EINVAL;
   }
+  signal(SIGINT, handle_sigint); 
 
   threads = std::stoi(argv[2], nullptr, 0);
   n = std::stoul(argv[3], nullptr, 0);

@@ -57,6 +57,8 @@ struct thread {
 	unsigned int		at_idx;
 	/* list link for when idle */
 	struct list_node	idle_link;
+	/* =e last received load */
+	unsigned long		load;
 };
 
 struct proc {
@@ -105,6 +107,17 @@ struct proc {
 	size_t max_overflows;
 	size_t nr_overflows;
 	unsigned long *overflow_queue;
+
+	// =e
+	/* load balancing counters  */
+	struct thread *overloaded_thread;
+	struct thread *underloaded_thread;
+	unsigned long overload_count;
+	unsigned long underload_count;
+	bool rebalancing_inprogress;
+	uint64_t last_rebalance_sent;
+	uint64_t last_rebalance_complete;
+	// struct load_balancing_candidate
 
 	/* table of physical addresses for shared memory */
 	physaddr_t		page_paddrs[];
@@ -306,3 +319,8 @@ extern void cores_adjust_assignments();
 extern void proc_set_overloaded(struct proc *p);
 extern unsigned int get_nr_avail_cores(void);
 extern unsigned int get_total_cores(void);
+
+// =e  load balancing
+extern void update_load_balancing_counters(struct thread *t, unsigned long load);
+extern bool check_load_balancing_conditions(struct thread *t);
+extern void reset_load_balancing_counters(struct thread *t, unsigned long payload);

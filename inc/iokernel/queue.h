@@ -61,6 +61,7 @@ enum {
 	RX_NET_COMPLETE,	/* contains tx_net_hdr.completion_data */
 	RX_JOIN,		/* immediate detach request for a kthread */
 	RX_CALL_NR,		/* number of commands */
+	RX_STEAL       /* // =e start stealing uThreads to rebalance the queues */
 };
 
 
@@ -84,4 +85,6 @@ enum {
 	TXCMD_PARKED,		/* hint to iokernel that kthread is parked */
 	TXCMD_PARKED_LAST,	/* the last undetached kthread is parking */
 	TXCMD_NR,		/* number of commands */
+	TXCMD_REPORT,	// =e /* reporting thread load to iokernel for load balancing */
+	TXCMD_BALANCE_COMPLETE  // =e /* LB completion notification */
 };

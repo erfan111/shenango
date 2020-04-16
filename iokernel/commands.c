@@ -7,7 +7,6 @@
 #include <base/log.h>
 #include <base/lrpc.h>
 #include <iokernel/queue.h>
-
 #include "defs.h"
 
 static int commands_drain_queue(struct thread *t, struct rte_mbuf **bufs, int n)
@@ -41,7 +40,14 @@ static int commands_drain_queue(struct thread *t, struct rte_mbuf **bufs, int n)
 				STAT_INC(RX_JOIN_FAIL, !success);
 			}
 			break;
-
+		// =e
+		case TXCMD_REPORT:
+			update_load_balancing_counters(t, payload);
+			check_load_balancing_conditions(t);
+			break;
+		case TXCMD_BALANCE_COMPLETE:
+			reset_load_balancing_counters(t, payload);
+			break;
 		default:
 			/* kill the runtime? */
 			BUG();

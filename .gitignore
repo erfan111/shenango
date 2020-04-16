@@ -7,3 +7,5 @@ iokerenld-noht
 *~
 .cproject
 .project
+.vscode
+*.csv

@@ -835,9 +835,10 @@ int cores_init(void)
 			continue;
 #endif
 		if ((i < 30 && i > 19) || i < 10) continue;
-		if (cpu_info_tbl[i].package == 1)
+		if (cpu_info_tbl[i].package == 1){
 			core_init(i);
 			ctr++;
+		}
 	}
 
 	log_info("cores: linux on core %d, control on %d, dataplane on %d",

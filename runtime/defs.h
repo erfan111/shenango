@@ -303,6 +303,8 @@ struct kthread {
 
 	/* 9th cache-line, statistics counters */
 	uint64_t		stats[STAT_NR];
+	// =e
+	uint32_t		load;
 };
 
 /* compile-time verification of cache-line alignment */
@@ -519,3 +521,4 @@ extern void sched_start(void) __noreturn;
 extern int thread_spawn_main(thread_fn_t fn, void *arg);
 extern void thread_yield_kthread();
 extern void join_kthread(struct kthread *k);
+extern bool triggered_steal(uint64_t overloaded_count);
